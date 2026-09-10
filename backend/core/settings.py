@@ -148,4 +148,4 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Auth0 Configuration
 AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN', 'dev-812cp2eq5nedb87n.us.auth0.com')
-AUTH0_AUDIENCE = os.getenv('AUTH0_AUDIENCE', 'https://api.todo-app.local')
+AUTH0_AUDIENCE = os.getenv('AUTH0_AUDIENCE', 'https://dev-812cp2eq5nedb87n.us.auth0.com/api/v2/')
