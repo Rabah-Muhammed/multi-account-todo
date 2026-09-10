@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Check, Trash2, Pencil, X, Search, Loader2 } from "lucide-react";
+import { Check, Trash2, Pencil, Search, Loader2, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
 import { Todo } from "@/app/types";
 
 interface Props {
@@ -19,15 +19,15 @@ export default function TodoDashboard({ user }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Filters
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "completed">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // New todo form
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
 
-  // Inline editing state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -42,6 +42,7 @@ export default function TodoDashboard({ user }: Props) {
     setError(null);
     try {
       const params = new URLSearchParams();
+      params.append("page", page.toString());
       if (statusFilter !== "all") params.append("status", statusFilter);
       if (searchQuery.trim()) params.append("search", searchQuery.trim());
 
@@ -52,14 +53,23 @@ export default function TodoDashboard({ user }: Props) {
       }
 
       const data = await res.json();
-      setTodos(Array.isArray(data) ? data : data.results || []);
+      if (Array.isArray(data)) {
+        setTodos(data);
+        setTotalCount(data.length);
+        setTotalPages(1);
+      } else {
+        setTodos(data.results || []);
+        setTotalCount(data.count || 0);
+        setTotalPages(Math.ceil((data.count || 0) / 10) || 1);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load todos");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchQuery]);
+  }, [page, statusFilter, searchQuery]);
 
+  // Single effect: reset page when filter/search changes, then fetch
   useEffect(() => {
     fetchTodos();
   }, [fetchTodos]);
@@ -85,9 +95,10 @@ export default function TodoDashboard({ user }: Props) {
 
       const created = await res.json();
       setTodos((prev) => [created, ...prev]);
+      setTotalCount((c) => c + 1);
       setNewTitle("");
       setNewDescription("");
-      showNotice("Task added successfully");
+      showNotice("Task added");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -97,23 +108,17 @@ export default function TodoDashboard({ user }: Props) {
 
   const handleToggle = async (todo: Todo) => {
     const originalStatus = todo.completed;
-    // Optimistic update
     setTodos((prev) =>
       prev.map((t) => (t.id === todo.id ? { ...t, completed: !t.completed } : t))
     );
-
     try {
       const res = await fetch(`/api/todos/${todo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ completed: !originalStatus }),
       });
-
-      if (!res.ok) {
-        throw new Error("Failed to update status");
-      }
+      if (!res.ok) throw new Error("Failed to update status");
     } catch (err: any) {
-      // Revert on error
       setTodos((prev) =>
         prev.map((t) => (t.id === todo.id ? { ...t, completed: originalStatus } : t))
       );
@@ -135,19 +140,13 @@ export default function TodoDashboard({ user }: Props) {
 
   const handleSaveEdit = async (id: string) => {
     if (!editTitle.trim()) return;
-
     try {
       const res = await fetch(`/api/todos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: editTitle.trim(),
-          description: editDescription.trim(),
-        }),
+        body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim() }),
       });
-
       if (!res.ok) throw new Error("Failed to save changes");
-
       const updated = await res.json();
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
       cancelEdit();
@@ -158,167 +157,182 @@ export default function TodoDashboard({ user }: Props) {
   };
 
   const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this task?")) return;
     try {
       const res = await fetch(`/api/todos/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete todo");
-
       setTodos((prev) => prev.filter((t) => t.id !== id));
+      setTotalCount((c) => c - 1);
       showNotice("Task deleted");
     } catch (err: any) {
       setError(err.message);
     }
   };
 
-  const totalCount = todos.length;
   const completedCount = todos.filter((t) => t.completed).length;
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
-      {/* Top Navbar */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-              T
+    <div className="min-h-screen bg-slate-50">
+      {/* Navbar */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 will-change-transform">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center">
+              <ClipboardList className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <span className="font-semibold text-gray-900 text-sm">Multi-Account Todo</span>
-              <span className="hidden sm:inline text-xs text-gray-400 ml-2 font-mono">
-                {user.email || user.name}
-              </span>
-            </div>
+            <span className="font-semibold text-slate-800 text-sm">Todos</span>
           </div>
-          <a
-            href="/auth/logout"
-            className="text-xs font-medium text-gray-600 hover:text-gray-900 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
-          >
-            Sign Out
-          </a>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:block text-xs text-slate-400 max-w-[180px] truncate">
+              {user.email || user.name}
+            </span>
+            <a
+              href="/auth/logout"
+              className="text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Sign out
+            </a>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 pt-6 space-y-6">
-        {/* Notice feedback banner */}
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-5">
+        {/* Toast notification */}
         {notice && (
-          <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm px-4 py-2.5 rounded-lg">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2.5 rounded-lg flex items-center gap-2">
+            <Check className="w-4 h-4 shrink-0" />
             {notice}
           </div>
         )}
 
         {/* Error banner */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-lg flex items-center justify-between">
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg flex items-center justify-between gap-4">
             <span>{error}</span>
             <button
               onClick={fetchTodos}
-              className="text-xs font-semibold underline hover:no-underline ml-4"
+              className="text-xs font-semibold text-red-700 underline underline-offset-2 hover:no-underline whitespace-nowrap"
             >
-              Retry
+              Try again
             </button>
           </div>
         )}
 
-        {/* Create Todo Card */}
-        <section className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        {/* Create form */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-slate-700 mb-3">New task</h2>
           <form onSubmit={handleCreate} className="space-y-3">
-            <div>
-              <input
-                type="text"
-                placeholder="What needs to be done?"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                disabled={submitting}
-                className="w-full px-3.5 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-400"
-              />
-            </div>
-            <div>
-              <textarea
-                placeholder="Description (optional)"
-                rows={2}
-                value={newDescription}
-                onChange={(e) => setNewDescription(e.target.value)}
-                disabled={submitting}
-                className="w-full px-3.5 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-400 resize-none"
-              />
-            </div>
+            <input
+              type="text"
+              placeholder="Task title"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              disabled={submitting}
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            />
+            <textarea
+              placeholder="Description (optional)"
+              rows={2}
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              disabled={submitting}
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-none"
+            />
             <div className="flex justify-end">
               <button
                 type="submit"
                 disabled={submitting || !newTitle.trim()}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                <span>Add Task</span>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Add task
               </button>
             </div>
           </form>
-        </section>
+        </div>
 
-        {/* Filter & Search Bar */}
-        <section className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 text-xs font-medium w-full sm:w-auto">
-            {(["all", "active", "completed"] as const).map((filter) => (
+        {/* Filters + Search */}
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+          <div className="inline-flex bg-white border border-slate-200 rounded-lg p-1 gap-0.5">
+            {(["all", "active", "completed"] as const).map((f) => (
               <button
-                key={filter}
-                onClick={() => setStatusFilter(filter)}
-                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-md capitalize transition-colors ${
-                  statusFilter === filter
-                    ? "bg-blue-600 text-white font-semibold"
-                    : "text-gray-600 hover:text-gray-900"
+                key={f}
+                onClick={() => setStatusFilter(f)}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-medium capitalize transition-colors ${
+                  statusFilter === f
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
                 }`}
               >
-                {filter}
+                {f}
               </button>
             ))}
           </div>
 
-          <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="text"
               placeholder="Search tasks..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder:text-gray-400 bg-white"
+              className="w-full sm:w-56 pl-8.5 pr-3 py-2 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
             />
           </div>
-        </section>
+        </div>
 
-        {/* Todo List */}
-        <section className="space-y-2.5">
+        {/* Stats row */}
+        {totalCount > 0 && (
+          <div className="flex items-center gap-1 text-xs text-slate-400">
+            <span>{totalCount} task{totalCount !== 1 ? "s" : ""}</span>
+            <span>·</span>
+            <span>{completedCount} completed</span>
+            <span>·</span>
+            <span>{totalCount - completedCount} remaining</span>
+          </div>
+        )}
+
+        {/* Task list */}
+        <div className="space-y-2">
           {loading ? (
-            <div className="space-y-3">
+            <>
               {[1, 2, 3].map((n) => (
-                <div key={n} className="bg-white p-4 rounded-xl border border-gray-200 animate-pulse h-20" />
+                <div
+                  key={n}
+                  className="bg-white rounded-xl border border-slate-200 h-16 animate-pulse"
+                />
               ))}
-            </div>
+            </>
           ) : todos.length === 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-              <p className="text-gray-500 text-sm">No tasks found.</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {searchQuery ? "Try a different search term" : "Create a new task above to get started."}
+            <div className="bg-white rounded-xl border border-slate-200 py-16 text-center">
+              <ClipboardList className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+              <p className="text-sm font-medium text-slate-500">No tasks here</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {searchQuery ? "Try a different search term." : "Add a task above to get started."}
               </p>
             </div>
           ) : (
             todos.map((todo) => (
               <div
                 key={todo.id}
-                className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-start gap-3 transition-colors hover:border-gray-300"
+                className={`bg-white rounded-xl border transition-colors flex items-start gap-3 p-4 ${
+                  todo.completed ? "border-slate-100" : "border-slate-200 hover:border-slate-300"
+                }`}
               >
-                {/* Complete checkbox */}
+                {/* Checkbox */}
                 <button
                   type="button"
                   onClick={() => handleToggle(todo)}
-                  className={`mt-1 w-5 h-5 rounded border flex items-center justify-center transition-colors ${
+                  className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
                     todo.completed
-                      ? "bg-green-600 border-green-600 text-white"
-                      : "border-gray-300 hover:border-blue-500"
+                      ? "bg-emerald-500 border-emerald-500"
+                      : "border-slate-300 hover:border-indigo-400"
                   }`}
                 >
-                  {todo.completed && <Check className="w-3.5 h-3.5" />}
+                  {todo.completed && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                 </button>
 
-                {/* Content or Edit mode */}
+                {/* Content */}
                 <div className="flex-1 min-w-0">
                   {editingId === todo.id ? (
                     <div className="space-y-2">
@@ -326,48 +340,49 @@ export default function TodoDashboard({ user }: Props) {
                         type="text"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-blue-500 rounded text-sm text-gray-900"
+                        className="w-full px-3 py-1.5 border border-indigo-400 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
                       />
                       <textarea
                         rows={2}
                         value={editDescription}
                         onChange={(e) => setEditDescription(e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-xs text-gray-700"
+                        className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleSaveEdit(todo.id)}
-                          className="px-2.5 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-lg transition-colors"
                         >
                           Save
                         </button>
                         <button
                           onClick={cancelEdit}
-                          className="px-2.5 py-1 border border-gray-300 text-gray-600 text-xs rounded hover:bg-gray-50"
+                          className="px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-medium rounded-lg transition-colors"
                         >
                           Cancel
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <div>
-                      <h3
-                        className={`text-sm font-medium ${
-                          todo.completed ? "line-through text-gray-400" : "text-gray-900"
+                    <>
+                      <p
+                        className={`text-sm font-medium leading-snug ${
+                          todo.completed ? "line-through text-slate-400" : "text-slate-800"
                         }`}
                       >
                         {todo.title}
-                      </h3>
+                      </p>
                       {todo.description && (
                         <p
-                          className={`text-xs mt-1 ${
-                            todo.completed ? "text-gray-300" : "text-gray-500"
+                          className={`text-xs mt-0.5 leading-relaxed ${
+                            todo.completed ? "text-slate-300" : "text-slate-500"
                           }`}
                         >
                           {todo.description}
                         </p>
                       )}
-                      <span className="text-[11px] text-gray-400 mt-2 inline-block">
+                      <span className="text-[11px] text-slate-400 mt-1 inline-block">
                         {new Date(todo.created_at).toLocaleDateString(undefined, {
                           month: "short",
                           day: "numeric",
@@ -375,39 +390,57 @@ export default function TodoDashboard({ user }: Props) {
                           minute: "2-digit",
                         })}
                       </span>
-                    </div>
+                    </>
                   )}
                 </div>
 
-                {/* Actions */}
+                {/* Action buttons */}
                 {editingId !== todo.id && (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => startEdit(todo)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 rounded-md hover:bg-blue-50 transition-colors"
                       title="Edit"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                     >
-                      <Pencil className="w-3.5 h-3.5" />
+                      <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDelete(todo.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
                       title="Delete"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 )}
               </div>
             ))
           )}
-        </section>
+        </div>
 
-        {/* Footer info */}
-        {todos.length > 0 && (
-          <footer className="text-center text-xs text-gray-400 pt-2">
-            {completedCount} of {totalCount} tasks completed
-          </footer>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </button>
+            <span className="text-xs font-medium text-slate-500 px-2">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         )}
       </main>
     </div>

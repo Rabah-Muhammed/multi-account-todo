@@ -126,3 +126,23 @@ class TodoAPITests(APITestCase):
         results = self._items(response)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['title'], 'Buy apples')
+
+    def test_invalid_token_is_rejected(self):
+        response = self.client.get(
+            '/api/todos/',
+            HTTP_AUTHORIZATION='Bearer invalid.token.value'
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_api_pagination(self):
+        for i in range(15):
+            Todo.objects.create(account=self.account_a, title=f"Task {i}")
+
+        self.client.force_authenticate(user=self.user_a)
+        response = self.client.get('/api/todos/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('results', response.data)
+        self.assertEqual(response.data['count'], 15)
+        self.assertEqual(len(response.data['results']), 10)
+        self.assertIsNotNone(response.data['next'])
