@@ -19,18 +19,19 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from root .env or backend/.env
+load_dotenv(BASE_DIR.parent / '.env')
+load_dotenv(BASE_DIR / '.env')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-beh%a5kmuop&u9-6v$)!^==!s8hi@$^rpy1acy3p1pzinu2adx'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-secret-key-change-in-prod')
 
-ALLOWED_HOSTS = []
+DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,backend').split(',') if h.strip()]
 
 # Application definition
 
@@ -124,6 +125,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -140,12 +143,14 @@ REST_FRAMEWORK = {
     ],
 }
 
+# CORS configuration
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
+    origin.strip()
+    for origin in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+    if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
 
 # Auth0 Configuration
-AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN', 'dev-812cp2eq5nedb87n.us.auth0.com')
-AUTH0_AUDIENCE = os.getenv('AUTH0_AUDIENCE', 'https://dev-812cp2eq5nedb87n.us.auth0.com/api/v2/')
+AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN', '')
+AUTH0_AUDIENCE = os.getenv('AUTH0_AUDIENCE', '')
