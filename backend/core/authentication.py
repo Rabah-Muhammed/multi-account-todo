@@ -20,6 +20,10 @@ class Auth0JWTAuthentication(authentication.BaseAuthentication):
     Validates Auth0 RS256 JWT tokens using Auth0's public JSON Web Key Set (JWKS).
     """
     jwks_client = None
+    
+    def authenticate_header(self, request):
+        """Returns the WWW-Authenticate header challenge so DRF returns 401 instead of 403."""
+        return 'Bearer'
 
     @classmethod
     def get_jwks_client(cls):
