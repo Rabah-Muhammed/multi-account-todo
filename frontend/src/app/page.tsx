@@ -1,4 +1,5 @@
-import { auth0 } from "./lib/auth0";
+import { auth0 } from "@/app/lib/auth0";
+import TodoDashboard from "./components/TodoDashboard";
 
 export default async function HomePage() {
   const session = await auth0.getSession();
@@ -27,26 +28,5 @@ export default async function HomePage() {
     );
   }
 
-  return (
-    <main className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <header className="flex items-center justify-between bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Welcome, {session.user.name || session.user.email}</h1>
-            <p className="text-xs text-gray-400 mt-1 font-mono">{session.user.sub}</p>
-          </div>
-          <a
-            href="/auth/logout"
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Log Out
-          </a>
-        </header>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-gray-600 text-sm">Auth0 session verified. Ready for Todo dashboard.</p>
-        </div>
-      </div>
-    </main>
-  );
+  return <TodoDashboard user={session.user} />;
 }
