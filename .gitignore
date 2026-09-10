@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+backend/venv/
+venv/
+.venv/
+
+# Secrets & environment
+.env
+.env.local
+.env.*.local
+
+# Python / Django
+__pycache__/
+*.pyc
+*.sqlite3
+media/
+
+# Next.js build
+.next/
+out/
+
+# System / Editor
+.DS_Store
+.vscode/
+.idea/
