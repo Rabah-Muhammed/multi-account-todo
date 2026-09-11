@@ -1,6 +1,8 @@
 # Multi-Account Todo
 
-A production-minded, full-stack Todo application built with Next.js, Django REST Framework, and Auth0. The core design principle is strict account-level data isolation—every authenticated user can only access and modify their own todos, enforced server-side.
+A full-stack todo application built with Next.js, Django REST Framework, and Auth0.
+
+The primary requirement is account-level data isolation: every todo belongs to the user who created it, and users can only ever access or modify their own tasks.
 
 ## Live Demo
 
@@ -9,61 +11,42 @@ A production-minded, full-stack Todo application built with Next.js, Django REST
 
 ---
 
+## Overview & Architecture
+
+The application is split into two independent services:
+
+1. **Next.js frontend (App Router)**: Handles the UI, Auth0 login/logout flow, and routes API requests through server-side proxy handlers (`/api/todos`). The browser never contacts the Django API directly with user tokens; Next.js extracts the access token from the session on the server and forwards it to Django in the `Authorization: Bearer <token>` header.
+2. **Django backend (DRF)**: Validates incoming RS256 JWTs against Auth0's public keys (`.well-known/jwks.json`). When a valid token arrives, Django extracts the `sub` claim (Auth0 user ID) and looks up or creates a local `Account` record.
+3. **Database**: SQLite for local development, with PostgreSQL supported via `DATABASE_URL` (configured using `dj-database-url`).
+
+### Data Isolation & IDOR Prevention
+
+Preventing cross-account access (IDOR) is handled at the database query layer:
+
+- **Queries (`get_queryset`)**: Every query is filtered by the authenticated user's account:
+  ```python
+  def get_queryset(self):
+      return Todo.objects.filter(account=self.request.user.account)
+  ```
+  Because Django REST Framework routes all `GET`, `PATCH`, and `DELETE` detail requests through `get_queryset`, trying to access another user's todo ID returns a `404 Not Found`. Returning 404 instead of 403 prevents leaking whether that ID exists.
+
+- **Creation (`perform_create`)**: Even if a request body contains an `account` field, the serializer ignores it because `account` is omitted from writable fields. The view explicitly assigns ownership from the token:
+  ```python
+  def perform_create(self, serializer):
+      serializer.save(account=self.request.user.account)
+  ```
+
+---
+
 ## Features
 
-- **Strict Account Isolation (IDOR Protection)**: Database queries are permanently scoped to the authenticated user's account derived from the verified JWT. Cross-account access returns HTTP 404 with zero data leakage.
-- **Auth0 Authentication**: Full login, sign-up, session handling, and logout flow using `@auth0/nextjs-auth0` and Auth0 Universal Login. Backend verifies RS256 JWT signatures against Auth0 JWKS.
-- **Todo CRUD**: Create, read, inline edit, toggle completion, and delete tasks with confirmation dialogs.
-- **Filters & Search**: Filter tasks by status (`All`, `Active`, `Completed`) and perform real-time search queries by title.
-- **Server-Side Pagination**: Standard 10-item pagination supported by Django REST Framework and handled smoothly with Previous/Next UI controls and page counters.
-- **Optimistic UI Updates**: Task completion toggles update instantly on the frontend and automatically revert if the backend request fails.
-- **Clean, Responsive UI**: Built with Tailwind CSS and Lucide icons, including loading states, empty states, and toast notices.
-- **Automated Test Suite**: 13 automated tests covering authentication enforcement, CRUD operations, IDOR protection, account spoofing prevention, status filtering, search, and pagination.
-- **Docker Orchestration**: Complete `docker-compose.yml` for running both frontend and backend locally with a single command.
-
----
-
-## Tech Stack
-
-- **Frontend**: Next.js 16 (App Router, TypeScript, Tailwind CSS, `@auth0/nextjs-auth0`)
-- **Backend**: Django 5, Django REST Framework, Gunicorn, WhiteNoise
-- **Authentication**: Auth0 (RS256 JWT, PyJWT with cryptography)
-- **Database**: SQLite for local development; PostgreSQL ready via `dj-database-url` and `psycopg2-binary`
-- **Deployment**: Vercel (Frontend), Render (Backend container)
-
----
-
-## How It Works
-
-### 1. Authentication & Token Proxy
-Auth0 handles user credentials and session management. When the user logs in, Next.js stores an encrypted session cookie.
-
-The client browser never directly hits the Django backend with user credentials. Instead, Next.js API route handlers (`/api/todos`) act as a server-side proxy:
-1. The route handler calls `auth0.getAccessToken()` to retrieve the user's JWT.
-2. It forwards the request to Django with `Authorization: Bearer <token>`.
-3. Upstream errors and responses are safely normalized and returned to the client.
-
-### 2. JWT Verification on Django
-Django validates every incoming request with a custom `Auth0JWTAuthentication` class:
-- Fetches and caches Auth0 public signing keys (`PyJWKClient`) from the Auth0 JWKS endpoint.
-- Validates the token's RS256 signature, `issuer`, and `audience`.
-- Extracts the `sub` claim (unique Auth0 user ID) and upserts an `Account` record locally via `get_or_create`.
-
-### 3. IDOR Protection (Account-Level Isolation)
-Every database query in `TodoViewSet` is constrained to the verified user's account:
-
-```python
-def get_queryset(self):
-    return Todo.objects.filter(account=self.request.user.account)
-```
-
-- **Read/Update/Delete Isolation**: If User A tries to access or modify `/api/todos/<User-B-Todo-ID>/`, DRF's `get_object()` finds no matching record in User A's queryset and immediately returns a `404 Not Found`.
-- **Create Isolation**: `perform_create` forces ownership from the verified JWT, ignoring any `account` values provided in the request payload:
-
-```python
-def perform_create(self, serializer):
-    serializer.save(account=self.request.user.account)
-```
+- User authentication with Auth0 (signup, login, session management, logout)
+- Todo CRUD (create, view, inline edit, toggle status, delete with confirmation)
+- Status filter tabs (All, Active, Completed) and real-time search by title
+- Server-side pagination (10 items per page) with Previous/Next controls
+- Optimistic toggle in the UI (reverts automatically if the request fails)
+- 13 backend test cases covering auth, CRUD, IDOR isolation, and pagination
+- Docker Compose setup for running both services locally with one command
 
 ---
 
@@ -73,55 +56,55 @@ def perform_create(self, serializer):
 multi-account-todo/
 ├── backend/
 │   ├── core/
-│   │   ├── settings.py          # CORS, DRF, Auth0, WhiteNoise, and DB config
-│   │   ├── urls.py              # Root routing (/api/ -> todos.urls)
-│   │   ├── authentication.py    # Auth0 RS256 JWT validation & Account upsert
+│   │   ├── authentication.py   # Auth0 JWT validation & Account lookup
+│   │   ├── settings.py
+│   │   ├── urls.py
 │   │   └── wsgi.py
 │   ├── todos/
-│   │   ├── models.py            # Account and Todo UUID models
-│   │   ├── serializers.py       # TodoSerializer with read-only fields
-│   │   ├── views.py             # Scoped TodoViewSet with filter & search
-│   │   ├── urls.py              # DefaultRouter registration
-│   │   └── tests.py             # 13 APITestCase tests
-│   ├── Dockerfile               # Production container running Gunicorn
-│   ├── build.sh                 # Render build script (migrate + collectstatic)
+│   │   ├── models.py           # Account and Todo models (UUID primary keys)
+│   │   ├── serializers.py
+│   │   ├── views.py            # Scoped TodoViewSet with filter & search
+│   │   ├── urls.py
+│   │   └── tests.py            # 13 APITestCase tests
+│   ├── Dockerfile              # Container running Gunicorn
+│   ├── build.sh
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── api/todos/       # Server proxy GET & POST routes
-│   │   │   ├── api/todos/[id]/  # Server proxy PATCH & DELETE routes
-│   │   │   ├── components/      # TodoDashboard client component
-│   │   │   ├── lib/auth0.ts     # Auth0 client instance
-│   │   │   ├── page.tsx         # Landing page / Authenticated Dashboard
-│   │   │   └── types.ts         # TypeScript interfaces
-│   │   └── proxy.ts             # Auth0 Next.js 16 session middleware
+│   │   │   ├── api/todos/      # Server-side proxy routes
+│   │   │   ├── components/     # TodoDashboard component
+│   │   │   ├── lib/auth0.ts
+│   │   │   ├── page.tsx
+│   │   │   └── types.ts
+│   │   └── proxy.ts            # Auth0 session middleware
 │   ├── Dockerfile
 │   └── package.json
-├── docker-compose.yml           # Multi-container orchestration
-├── .env.example                 # Sanitized environment template
-└── README.md
+├── docker-compose.yml
+└── .env.example
 ```
 
 ---
 
-## Local Setup
+## Running Locally
 
 ### Prerequisites
+
 - Python 3.12+
 - Node.js 20+
-- An Auth0 Account
+- An Auth0 account (free tier)
 
-### 1. Auth0 Application Configuration
-1. In the Auth0 Dashboard, create a **Regular Web Application**.
-2. Configure **Application URIs**:
-   - **Allowed Callback URLs**: `http://localhost:3000/auth/callback`
-   - **Allowed Logout URLs**: `http://localhost:3000`
-   - **Allowed Web Origins**: `http://localhost:3000`
-3. Make note of your **Domain**, **Client ID**, and **Client Secret**.
-4. The API Audience default for Auth0 Management is: `https://<your-auth0-domain>/api/v2/`.
+### 1. Configure Auth0
+
+In your Auth0 dashboard, create a **Regular Web Application** and set:
+- **Allowed Callback URLs**: `http://localhost:3000/auth/callback`
+- **Allowed Logout URLs**: `http://localhost:3000`
+- **Allowed Web Origins**: `http://localhost:3000`
+
+Your audience is `https://<your-tenant>.us.auth0.com/api/v2/`.
 
 ### 2. Backend Setup
+
 ```bash
 cd backend
 python3 -m venv venv
@@ -132,26 +115,27 @@ python manage.py runserver 8000
 ```
 
 ### 3. Frontend Setup
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 4. Environment Configuration
+### 4. Environment Variables
 
 Create `frontend/.env.local`:
 ```bash
 APP_BASE_URL=http://localhost:3000
 AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_CLIENT_ID=your_client_id
-AUTH0_CLIENT_SECRET=your_client_secret
-AUTH0_SECRET=your_64_character_random_string  # openssl rand -hex 32
+AUTH0_CLIENT_ID=your-client-id
+AUTH0_CLIENT_SECRET=your-client-secret
+AUTH0_SECRET=your-64-char-secret            # run: openssl rand -hex 32
 AUTH0_AUDIENCE=https://your-tenant.us.auth0.com/api/v2/
 NEXT_PUBLIC_API_URL=http://localhost:8000/api
 ```
 
-Create root `.env` (for backend / Docker):
+Create root `.env` (for backend & Docker):
 ```bash
 DJANGO_SECRET_KEY=dev-secret-key-change-in-prod
 DJANGO_DEBUG=True
@@ -163,73 +147,43 @@ AUTH0_AUDIENCE=https://your-tenant.us.auth0.com/api/v2/
 
 ---
 
-## Running Automated Tests
+## Running with Docker
 
-Run the test suite with:
+To run both services together:
+
+```bash
+cp .env.example .env    # fill in your Auth0 credentials
+docker compose up --build
+```
+
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8000/api/`
+
+---
+
+## Tests
+
+Run the backend test suite:
 
 ```bash
 cd backend
 python manage.py test todos
 ```
 
-### Test Coverage Summary (13 Tests):
-- `test_requires_authentication`: Rejects unauthenticated requests with HTTP 401.
-- `test_invalid_token_is_rejected`: Ensures forged/expired tokens cannot access resources.
-- `test_create_todo`: Verifies authenticated task creation.
-- `test_cannot_spoof_account_on_create`: Ensures `account` in POST payload cannot hijack ownership.
-- `test_list_todos_scoped_to_user`: Asserts users only see their own tasks.
-- `test_update_todo`: Validates task modification for owner.
-- `test_delete_todo`: Validates task deletion for owner.
-- `test_idor_get_other_user_todo_returns_404`: Confirms fetching another user's task returns 404.
-- `test_idor_update_other_user_todo_returns_404`: Confirms modifying another user's task returns 404.
-- `test_idor_delete_other_user_todo_returns_404`: Confirms deleting another user's task returns 404.
-- `test_filter_by_status`: Tests `?status=active` and `?status=completed` query params.
-- `test_search_by_title`: Tests `?search=<query>` param on title.
-- `test_api_pagination`: Tests pagination response shape (`results`, `count`, `next`, `previous`).
+The 13 tests cover:
+- Rejecting requests without a token (401)
+- Rejecting invalid or forged tokens (401)
+- Creating, listing, updating, and deleting todos
+- IDOR prevention: attempting to read, update, or delete another user's todo returns 404
+- Account spoofing prevention: passing another user's account ID in POST payload is ignored
+- Status filtering (`?status=active`, `?status=completed`)
+- Search by title (`?search=...`)
+- Pagination response format and page sizing (10 items/page)
 
 ---
 
-## Docker Setup
+## Deployment Notes
 
-Run both services with a single command:
-
-```bash
-cp .env.example .env    # Configure your Auth0 credentials
-docker compose up --build
-```
-
-- Frontend accessible at: `http://localhost:3000`
-- Backend API accessible at: `http://localhost:8000/api/`
-
----
-
-## Public Deployment Notes
-
-### Backend on Render
-- **Runtime**: Docker (builds `backend/Dockerfile` with Gunicorn WSGI server)
-- **Startup Command**: `python manage.py migrate && gunicorn core.wsgi:application --bind 0.0.0.0:8000`
-- **Required Environment Variables**:
-  - `DJANGO_SECRET_KEY`: Strong production secret
-  - `DJANGO_DEBUG`: `False`
-  - `DJANGO_ALLOWED_HOSTS`: `*` (or `.onrender.com`)
-  - `CORS_ALLOWED_ORIGINS`: `https://multi-account-todo.vercel.app`
-  - `AUTH0_DOMAIN`: Auth0 tenant domain
-  - `AUTH0_AUDIENCE`: Auth0 API audience
-  - `DATABASE_URL`: *(Optional)* Render PostgreSQL internal connection string
-
-### Frontend on Vercel
-- **Framework**: Next.js (Root Directory set to `frontend`)
-- **Required Environment Variables**:
-  - `APP_BASE_URL`: `https://multi-account-todo.vercel.app`
-  - `AUTH0_DOMAIN`: Auth0 tenant domain
-  - `AUTH0_CLIENT_ID`: Auth0 Client ID
-  - `AUTH0_CLIENT_SECRET`: Auth0 Client Secret
-  - `AUTH0_SECRET`: 64-character encryption secret
-  - `AUTH0_AUDIENCE`: Auth0 API audience
-  - `NEXT_PUBLIC_API_URL`: `https://multi-account-todo-api.onrender.com/api`
-
-### Auth0 Production URIs
-In Auth0 Dashboard -> Application Settings:
-- **Allowed Callback URLs**: `http://localhost:3000/auth/callback, https://multi-account-todo.vercel.app/auth/callback`
-- **Allowed Logout URLs**: `http://localhost:3000, https://multi-account-todo.vercel.app`
-- **Allowed Web Origins**: `http://localhost:3000, https://multi-account-todo.vercel.app`
+- **Backend (Render)**: Deployed as a Docker web service running Gunicorn. Container startup command runs `python manage.py migrate` before launching Gunicorn so database tables are ready.
+- **Frontend (Vercel)**: Deployed with root directory set to `frontend`.
+- For production, Auth0's Allowed Callback, Logout, and Web Origin URLs include both `localhost:3000` and `https://multi-account-todo.vercel.app`.
